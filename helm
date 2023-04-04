@@ -1,0 +1,430 @@
+
+#{{- $mqtt_name :=  randAlpha 5 | lower  -}}
+{{- $ORG_ID :=  "test"  -}}
+#{{- $mqtt_pass :=  randAlpha 5 | lower -}}
+{{- $SQL_USERNAME :=  "root" -}}
+{{- $SQL_PASSWORD :=  randAlpha 10 | lower  -}}
+{{- $SQL_DATABASE := "dragon_control" -}}
+{{- $APP_NAME := "hivecms" -}}
+---
+
+  
+
+  
+    
+
+  
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+  namespace: {{ .Values.hive.org_id  }}
+  labels:
+    name: hivecms
+    resource_type: {{ .Values.resource_type }}
+    router-launch-id: {{ .Values.hive.router_launch_id }}
+    org-id: {{ .Values.hive.org_id  }}
+    user_app_label: {{ .Values.hive.user_app_label }}
+    app_type: {{ .Values.hive.app_type_name }}
+    srv_name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+    pod: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+    UPDATE: {{ .Values.hive.update }}
+type: Opaque
+stringData:
+  email: {{ .Values.hive.hive_admin_email }}
+  hive_namespace: {{ .Values.hive.org_id }}
+  router_launch_id: {{ .Values.hive.router_launch_id }}
+  hive_srv_name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+  db_host: mysql-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+  db_password: {{ $SQL_PASSWORD }}
+  db_username: {{ $SQL_USERNAME }}
+  db_database: {{ $SQL_DATABASE }}
+  password: {{ .Values.hive.password }}
+  mqtt_username: {{ .Values.hive.mqtt_name }}
+  mqtt_password: {{ .Values.hive.mqtt_pass }}
+  name_router: {{ .Values.hive.namerouter }}
+  org_router: {{ .Values.hive.orgrouter }}
+  smtpusername: {{ .Values.hive.smtpusername }}
+  smtppassword: {{ .Values.hive.smtppassword }}
+  smtpaddress: {{ .Values.hive.smtpaddress }}
+  smtpname: {{ .Values.hive.smtpname }}
+  smtpport: {{ .Values.hive.smtp_port }}
+  
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: {{ .Values.hive.org_id  }}
+  name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+  labels:
+    name: hivecms
+    resource_type: {{ .Values.resource_type }}
+    router-launch-id: {{ .Values.hive.router_launch_id }}
+    org-id: {{ .Values.hive.org_id  }}
+    user_app_label: {{ .Values.hive.user_app_label }}
+    app_type: {{ .Values.hive.app_type_name }}
+    srv_name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+    pod: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+    UPDATE: {{ .Values.hive.update }}
+    
+spec:
+  type: LoadBalancer
+  selector:
+    name: hivecms
+    resource_type: {{ .Values.resource_type }}
+    org-id: {{ .Values.hive.org_id  }}
+    app_type: {{ .Values.hive.app_type_name }}
+    router-launch-id: {{ .Values.hive.router_launch_id }}
+    user_app_label: {{ .Values.hive.user_app_label }}
+    srv_name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+    pod: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+    UPDATE: {{ .Values.hive.update }}
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  - name: https
+    port: 443
+    protocol: TCP
+    targetPort: 443  
+  - name: websocket
+    port: 6001
+    protocol: TCP
+    targetPort: 6001
+  - name: android
+    port: 1883
+    protocol: TCP
+    targetPort: 1883 
+  - name: mosquitto
+    port: 9001
+    protocol: TCP
+    targetPort: 9001
+---    
+## SQL Service 
+
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: {{ .Values.hive.org_id  }}
+  name: mysql-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+  labels:
+    name: sql
+    resource_type: {{ .Values.resource_type }}
+    org-id: {{ .Values.hive.org_id  }}
+    router-launch-id: {{ .Values.hive.router_launch_id }}
+    srv_name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+spec:
+  selector:
+    name: sql
+    resource_type: {{ .Values.resource_type }}
+    org-id: {{ .Values.hive.org_id  }}
+    router-launch-id: {{ .Values.hive.router_launch_id }}
+    srv_name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+  type: ClusterIP
+#  type: LoadBalancer
+  ports:
+  - protocol: "TCP"
+    port: 3306
+    targetPort: 3306
+
+---
+
+# SQL Deployment
+
+apiVersion: apps/v1 
+kind: Deployment
+metadata:
+  namespace: {{ .Values.hive.org_id  }}
+  name: mysql-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+  labels:
+    name: sql
+    resource_type: {{ .Values.resource_type }}
+    org-id: {{ .Values.hive.org_id  }}
+    router-launch-id: {{ .Values.hive.router_launch_id }}
+    srv_name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+spec:
+  selector:
+    matchLabels:
+      name: sql
+      resource_type: {{ .Values.resource_type }}
+      org-id: {{ .Values.hive.org_id }}
+      router-launch-id: {{ .Values.hive.router_launch_id }}
+      srv_name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+  template:
+    metadata:
+      labels:
+        name: sql
+        resource_type: {{ .Values.resource_type }}
+        org-id: {{ .Values.hive.org_id  }}
+        router-launch-id: {{ .Values.hive.router_launch_id }}
+        srv_name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+    spec:
+     # nodeSelector:
+      #  disktype: ssd
+      volumes:
+      - name: pvc
+        persistentVolumeClaim:
+          claimName: vol-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+        
+      containers:
+      - image: mysql
+        name: mysql
+        resources:
+           limits:
+             cpu: {{ .Values.resources.limits.sql_cpu }}
+             memory: {{ .Values.resources.limits.sql_memory }}
+           requests:
+             cpu: {{ .Values.resources.requests.sql_cpu }}
+             memory: {{ .Values.resources.requests.sql_memory }} 
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: db_password
+        - name: MYSQL_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: db_database
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: db_password
+        - name: EMAIL
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: email
+        - name: HIVE_NAMESPACE
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: hive_namespace 
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - name: pvc
+          mountPath: /var/lib/mysql
+        
+---
+
+# Persistent Storage 
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  namespace: {{ .Values.hive.org_id }}
+  name: vol-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+  labels:
+    name: sql
+    resource_type: {{ .Values.resource_type }}
+    org-id: {{ .Values.hive.org_id  }}
+    router-launch-id: {{ .Values.hive.router_launch_id }}
+    srv_name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 8000Mi
+
+---
+
+# App Deployment
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: {{ .Values.hive.org_id  }}
+  name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+  labels:
+    name: hivecms
+    resource_type: {{ .Values.resource_type }}
+    org-id: {{ .Values.hive.org_id  }}
+    router-launch-id: {{ .Values.hive.router_launch_id }}
+    app_type: {{ .Values.hive.app_type_name }}
+    user_app_label: {{ .Values.hive.user_app_label }}
+    srv_name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+    pod: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+    UPDATE: {{ .Values.hive.update }}
+spec:
+  selector:
+    matchLabels:
+      name: hivecms
+      resource_type: {{ .Values.resource_type }}
+      org-id: {{ .Values.hive.org_id  }}
+      router-launch-id: {{ .Values.hive.router_launch_id }}
+      user_app_label: {{ .Values.hive.user_app_label }}
+      app_type: {{ .Values.hive.app_type_name }}
+      srv_name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+      pod: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+      UPDATE: {{ .Values.hive.update }}
+  replicas: {{ .Values.highavailibility.Replica }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+       maxSurge: 1
+       maxUnavailable: 1
+  minReadySeconds: 30  
+  template:
+    metadata:
+      labels:
+        name: hivecms
+        resource_type: {{ .Values.resource_type }}
+        org-id: {{ .Values.hive.org_id  }}
+        app_type: {{ .Values.hive.app_type_name }}
+        router-launch-id: {{ .Values.hive.router_launch_id }}
+        user_app_label: {{ .Values.hive.user_app_label }}
+        srv_name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+        pod: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+        UPDATE: {{ .Values.hive.update }}
+    spec:
+      #nodeSelector:
+       # disktype: ssd
+      initContainers:
+      - name: sql-{{ .Values.hive.org_id  }}-init
+        image: mysql 
+        command: 
+          - sh
+          - -c
+          - |
+            until mysql -u {{ $SQL_USERNAME }} --password={{ $SQL_PASSWORD }} -h mysql-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }} -e 'show databases;';
+            do 
+              echo 'waiting for mysql'
+              sleep 2
+            done  
+      containers:
+      - name: {{ $APP_NAME }}-container
+        image: {{ .Values.image.cmsrepository }}
+        
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+        - containerPort: 6001
+        - containerPort: 22
+        resources:
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}   
+        env:
+        - name: SMTP_MAIL_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: smtpusername
+        - name: SMTP_MAIL_PORT
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: smtpport      
+        - name: SMTP_MAIL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: smtppassword    
+        - name: SMTP_MAIL_FROM_ADDRESS
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: smtpaddress      
+        - name: SMTP_MAIL_FROM_NAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: smtpname 
+        - name: HIVE_NAMESPACE
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: hive_namespace 
+        - name: MQTT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: mqtt_username
+        - name: MQTT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: mqtt_password     
+        - name: HIVE_NAMESPACE
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: hive_namespace 
+        - name: DB_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: db_database
+        - name: DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: db_username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: db_password
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: db_host
+        - name: HIVE_SRV_NAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: hive_srv_name
+        - name: EMAIL
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: email
+        - name: PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: password      
+        - name: NAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: name_router       
+        - name: ORG_NAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ $APP_NAME }}-{{ .Values.hive.org_id  }}-{{ .Values.hive.instance_id }}
+              key: org_router          
+         
+        
+      - name: {{ $APP_NAME }}-mosquitto-container
+        image: {{ .Values.image.repository }}
+        imagePullPolicy: Always
+    
+        ports:
+        - containerPort: 1883  
+        - containerPort: 9001  
+        resources:
+           limits:
+             cpu: {{ .Values.resources.limits.mqtt_cpu }}
+             memory: {{ .Values.resources.limits.mqtt_memory }}
+           requests:
+             cpu: {{ .Values.resources.requests.mqtt_cpu }}
+             memory: {{ .Values.resources.requests.mqtt_memory }}
+        
+        
+          
+     
+      
+      
+        
+---
