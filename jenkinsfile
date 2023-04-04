@@ -1,0 +1,400 @@
+pipeline{
+
+    agent any
+
+    environment {
+        AWS_ACCOUNT_ID="626690110339"
+        AWS_DEFAULT_REGION="us-east-1" 
+        IMAGE_REPO_NAME="mqtt"
+        IMAGE_TAG="latest"
+        REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${IMAGE_REPO_NAME}"
+	
+    }
+    
+      
+    options{
+        timestamps()
+        buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '5', daysToKeepStr: '', numToKeepStr: '5'))
+    }
+    parameters{ 
+            booleanParam(description: 'For high availibility click on check box', name: 'HIGH_AVAILABILITY')
+            booleanParam(description: 'For to Auto-update the application click on check box (NOTE : Downtime if HIGH_AVAILIBILTY is unticked )', name: 'AUTO_UPDATE')
+            choice(choices: ['tiny', 'medium', 'large'], description: 'Choose the Resource', name: 'RESOURCES')
+            validatingString(defaultValue: '', description: 'Enter HIVE_ROUTER_LAUCH_ID', failedValidationMessage: 'INVALID HIVE_ROUTER_LAUCH_ID', name: 'HIVE_ROUTER_LAUCH_ID', regex: '^(?=.*[a-z])[-a-z0-9]{10,50}$')
+            validatingString(defaultValue: '', description: 'Enter HIVE_ORG_ID', failedValidationMessage: 'Invalid ORG ID', name: 'HIVE_ORG_ID', regex: '^[A-Za-z_][A-Za-z\\d_]*$')
+            string(description: 'ENTER EMAIL', name: 'HIVE_ADMIN_EMAIL')
+            string(defaultValue: 'HIVECMS', name: 'USER_APP_LABEL')
+	    string(defaultValue: 'Admin', name: 'HIVE_USERNAME')
+	    string(defaultValue: 'Org', name: 'HIVE_ORGNAME')
+            choice(choices: ['us-east-1', 'us-east-2'], description: 'Choose the Region', name: 'HIVE_DEPLOYMENT_REGION')
+        
+    }   
+
+stages{
+
+    stage('Validating Parameters'){
+        steps{	
+	    
+            echo "HIVE_ROUTER_LAUCH_ID = ${HIVE_ROUTER_LAUCH_ID}"
+            echo "HIVE_ORG_ID = ${HIVE_ORG_ID}"	
+            echo "HIVE_ADMIN_EMAIL = ${HIVE_ADMIN_EMAIL}"
+            echo "HIVE_ADMIN_PASSWORD = ${HIVE_ADMIN_PASSWORD}"
+            echo "HIVE_DEPLOYMENT_REGION = ${HIVE_DEPLOYMENT_REGION}"
+            echo "HIGH_AVAILABILITY = ${params.HIGH_AVAILABILITY}"
+            echo "AUTO_UPDATE = ${params.AUTO_UPDATE}"
+            echo "RESOURCES = ${params.RESOURCES}"
+        }
+    }
+    
+
+    stage('CheckOut Git'){
+        steps{
+              
+            checkout([$class: 'GitSCM', branches: [[name: 'main']], extensions: [], userRemoteConfigs: [[credentialsId: '0ccca149-9a03-4dd4-b945-bfd9525da089', url: 'https://github.com/EmbedTech-Solutions-Pvt-Ltd/HIVE-DevOps.git']]])	
+              
+        }
+    }
+    
+  
+    stage('IMAGE ID')   {
+    steps {
+         sh '''#!/bin/bash
+            image=$(aws ecr list-images --repository-name hive-cms --filter "tagStatus=TAGGED" | head -n 4 | tail -n 1| awk '{print $2}')
+            echo $image
+         '''
+    }
+}   
+    
+	      
+	
+    stage('Launching APP'){
+        
+        steps{
+            
+            script{
+                dir('./HIVE-CMS-REPO/HIVE-CMS/HELM'){
+                    
+                  
+                    sh '''#!/bin/bash
+
+                    LOG () {
+                        echo "[`date`] - ${*}"
+                        #echo "[`date`] - ${*}" >> $LOG_FILE
+                    }
+		    
+		    cmsimage=$(aws ecr describe-images --output json --repository-name hive-cms --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' | jq . --raw-output)
+		    // echo $cmsimage
+		    version=626690110339.dkr.ecr.us-east-1.amazonaws.com/hive-cms:$cmsimage
+		    // echo $version
+		    MQTT_NAME=$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 5 | head -n 1)
+		    MQTT_PASSWORD=$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 5 | head -n 1)
+		    aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+		    docker build -t mqtt --build-arg username=${MQTT_NAME} --build-arg password=${MQTT_PASSWORD} --no-cache .
+		    docker tag ${IMAGE_REPO_NAME}:${IMAGE_TAG} ${REPOSITORY_URI}:$IMAGE_TAG
+	            docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${IMAGE_REPO_NAME}:${IMAGE_TAG}
+		    tag=$(aws ecr list-images --repository-name mqtt  --region us-east-1 --filter "tagStatus=TAGGED" | grep imageDigest| awk '{print $2}' | cut -b 2-72)
+		   // echo "tag = $tag"
+		    untagged=626690110339.dkr.ecr.us-east-1.amazonaws.com/mqtt@$tag
+ 		   // echo "untagged = $untagged"
+		    
+		    
+                    kubectl create ns ${HIVE_ORG_ID} || true
+                    STATUS=$(kubectl get ns ${HIVE_ORG_ID} -o jsonpath='{.status.phase}' || true)
+                    echo "${HIVE_ORG_ID} Namespace is = ${STATUS}"
+                        
+                    INSTANCE_ID=$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 10 | head -n 1)
+                    echo "INSTANCE_ID = ${INSTANCE_ID}"
+		    SMTP_MAIL_PORT=P${SMTP_MAIL_PORT}
+		    NAME=hivecms-${HIVE_ORG_ID}-${INSTANCE_ID}
+		    echo $NAME
+                    echo "AUTO_UPDATE = ${AUTO_UPDATE}"
+                    if [[ "${AUTO_UPDATE}" == "false" ]]; then
+                      AUTO_UPDATE="disabled"
+                      echo "AUTO_UPDATE = ${AUTO_UPDATE}"
+                    else
+                      AUTO_UPDATE="enabled"
+                      echo "AUTO_UPDATE = ${AUTO_UPDATE}"
+                    fi  
+		    	echo $RESOURCES
+		    
+                       	     case $RESOURCES in
+                                        "tiny")
+                                               CMS_MEMORY_LIMIT=4000Mi
+					       CMS_MEMORY_REQUEST=3500Mi
+					       CMS_CPU_LIMIT=2
+					       CMS_CPU_REQUEST=1
+					       MQTT_MEMORY_LIMIT=200Mi
+					       MQTT_MEMORY_REQUEST=100Mi
+					       MQTT_CPU_LIMIT=200m
+					       MQTT_CPU_REQUEST=100m
+					       SQL_MEMORY_LIMIT=1000Mi
+					       SQL_MEMORY_REQUEST=500Mi
+					       SQL_CPU_LIMIT=1
+					       SQL_CPU_REQUEST=500m
+                                                ;;
+                                        "medium")
+                                               CMS_MEMORY_LIMIT=4800Mi
+					       CMS_MEMORY_REQUEST=4200Mi
+					       CMS_CPU_LIMIT=2.4
+					       CMS_CPU_REQUEST=1.2
+					       MQTT_MEMORY_LIMIT=240Mi
+					       MQTT_MEMORY_REQUEST=120Mi
+					       MQTT_CPU_LIMIT=240m
+					       MQTT_CPU_REQUEST=120m
+					       SQL_MEMORY_LIMIT=1200Mi
+					       SQL_MEMORY_REQUEST=600Mi
+					       SQL_CPU_LIMIT=1.2
+					       SQL_CPU_REQUEST=600m
+                                                ;;
+                                         "large")
+                                               CMS_MEMORY_LIMIT=5760Mi
+					       CMS_MEMORY_REQUEST=5040Mi
+					       CMS_CPU_LIMIT=2.88
+					       CMS_CPU_REQUEST=1.44
+					       MQTT_MEMORY_LIMIT=288Mi
+					       MQTT_MEMORY_REQUEST=144Mi
+					       MQTT_CPU_LIMIT=288m
+					       MQTT_CPU_REQUEST=144m
+					       SQL_MEMORY_LIMIT=1440Mi
+					       SQL_MEMORY_REQUEST=720Mi
+					       SQL_CPU_LIMIT=1.44
+					       SQL_CPU_REQUEST=720m
+                                                ;;        
+                                esac
+				
+				echo "Resource Allocation:"
+                                echo "CMS_MEMORY_LIMIT = ${CMS_MEMORY_LIMIT}"
+				echo "CMS_MEMORY_REQUEST = ${CMS_MEMORY_REQUEST}"
+				echo "CMS_CPU_LIMIT = ${CMS_CPU_LIMIT}"
+				echo "CMS_CPU_REQUEST = ${CMS_CPU_REQUEST}"
+				echo "MQTT_MEMORY_LIMIT = ${MQTT_MEMORY_LIMIT}"
+				echo "MQTT_MEMORY_REQUEST = ${MQTT_MEMORY_REQUEST}"
+				echo "MQTT_CPU_LIMIT = ${MQTT_CPU_LIMIT}"
+				echo "MQTT_CPU_REQUEST = ${MQTT_CPU_REQUEST}"
+				echo "SQL_MEMORY_LIMIT = ${SQL_MEMORY_LIMIT}"
+				echo "SQL_MEMORY_REQUEST = ${SQL_MEMORY_REQUEST}"
+				echo "SQL_CPU_LIMIT = ${SQL_CPU_LIMIT}"
+				echo "SQL_CPU_REQUEST = ${SQL_CPU_REQUEST}"
+		    
+		    
+		    
+                    if [[ "${HIGH_AVAILABILITY}" == "false" ]]; then			
+                       REPLICAS=1                   
+                    else
+           		REPLICAS=2 	
+                    fi    
+		    
+                    echo "REPLICAS = $REPLICAS"
+		    	   helm install ${NAME} helm -n ${HIVE_ORG_ID} \
+			    --set hive.orgrouter=${HIVE_ORGNAME} \
+			    --set hive.namerouter=${HIVE_USERNAME} \
+			    --set hive.app_type_name=${APP_TYPE_NAME} \
+			    --set image.cmsrepository=${version} \
+			    --set image.repository=${untagged} \
+			    --set hive.router_launch_id=${HIVE_ROUTER_LAUCH_ID} \
+			    --set hive.mqtt_name=${MQTT_NAME} \
+			    --set hive.mqtt_pass=${MQTT_PASSWORD}  \
+			    --set hive.org_id=${HIVE_ORG_ID} \
+			    --set hive.instance_id=${INSTANCE_ID} \
+			    --set hive.hive_admin_email=${HIVE_ADMIN_EMAIL} \
+			    --set hive.password=${HIVE_ADMIN_PASSWORD} \
+			    --set resources.limits.memory=${CMS_MEMORY_LIMIT} \
+			    --set resources.requests.memory=${CMS_MEMORY_REQUEST} \
+			    --set resources.limits.cpu=${CMS_CPU_LIMIT} \
+			    --set resources.requests.cpu=${CMS_CPU_REQUEST} \
+			    --set resources.limits.mqtt_memory=${MQTT_MEMORY_LIMIT} \
+			    --set resources.requests.mqtt_memory=${MQTT_MEMORY_REQUEST} \
+			    --set resources.limits.mqtt_cpu=${MQTT_CPU_LIMIT} \
+			    --set resources.requests.mqtt_cpu=${MQTT_CPU_REQUEST} \
+			    --set resources.limits.sql_memory=${SQL_MEMORY_LIMIT} \
+			    --set resources.requests.sql_memory=${SQL_MEMORY_REQUEST} \
+			    --set resources.limits.sql_cpu=${SQL_CPU_LIMIT} \
+			    --set resources.requests.sql_cpu=${SQL_CPU_REQUEST} \
+			    --set hive.update=${AUTO_UPDATE} \
+			    --set hive.org_id=${HIVE_ORG_ID} \
+			    --set highavailibility.Replica=${REPLICAS} \
+			    --set hive.user_app_label=${USER_APP_LABEL} \
+			    --set resource_type=${RESOURCES} \
+			    --set hive.name_router=${NAME} \
+			    --set hive.smtpusername=${SMTP_MAIL_USERNAME} \
+			    --set hive.smtppassword=${SMTP_MAIL_PASSWORD} \
+			    --set hive.smtpname=${SMTP_MAIL_FROM_NAME} \
+			    --set hive.smtpaddress=${SMTP_MAIL_FROM_ADDRESS} \
+			    --set hive.smtp_port=${SMTP_MAIL_PORT}
+	            HELM=$(helm ls -n ${HIVE_ORG_ID} | grep ${NAME} | awk '{print $1}')
+
+		    echo "HELM = $HELM"   
+                    
+                    if [[ "$HELM" == "${NAME}" ]]; then
+                      echo "Helm Chart Installation Sucessful"
+                    else
+                      echo "Failed to install Helm Chart"
+                      exit -1
+                    fi
+                        
+                    echo "DNS Setup Started at: $(date "+%Y.%m.%d-%H.%M.%S")"
+                        
+                    export NAMESPACE="${HIVE_ORG_ID}"
+                    export SERVICE_NAME="hivecms-${HIVE_ORG_ID}-${INSTANCE_ID}"
+                    
+                    echo "SERVICE_NAME = $SERVICE_NAME"
+                    
+                    export LB_STATUS=$(kubectl get svc $SERVICE_NAME -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress}')
+                  //  echo "LB_STATUS = ${LB_STATUS}"
+                    
+                    while [[ "$LB_STATUS" != *"hostname"* ]]
+                    do
+                        export LB_STATUS=$(kubectl get svc $SERVICE_NAME -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress}')
+                        echo "Waiting for LoadBalancer:  ${LB_STATUS}"
+                        sleep 1
+                    done                    
+                    echo "LoadBalancer Found!"
+                    echo "Setting DNS for : $SERVICE_NAME"
+                    export LB_NAME=$(kubectl get svc  $SERVICE_NAME -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+                    
+                    if [[ -z "${LB_NAME}" ]]; then
+                      echo "LoadBalancer undefined"
+                      exit -1
+                    fi
+                    
+                    echo "LoadBalancer : $LB_NAME"
+                    
+                    if [[ -z "${LB_NAME}" ]]; then
+                      LOG "LoadBalancer undefined"
+                      exit -1
+                    fi
+                    
+                    # TODO: This need to come dynamic based on the zone selected
+                    export HOSTED_ZONE="Z35SXDOTRQ7X7K"
+                    
+                    export RESOURCERECORDSET="${SERVICE_NAME}.myhive-control.com"
+                    export LB_NAME="${LB_NAME}."
+                    jq -n --arg LB_NAME "$LB_NAME" \
+                          --arg HOSTED_ZONE "$HOSTED_ZONE" \
+                          --arg RESOURCERECORDSET "$RESOURCERECORDSET" '{
+                    	"Comment": "CREATE a record",
+                    	"Changes": [{
+                    		"Action": "CREATE",
+                    		"ResourceRecordSet": {
+                    			"Name": $RESOURCERECORDSET,
+                                "Type": "A",
+                                "AliasTarget": {
+                                    "HostedZoneId": $HOSTED_ZONE,
+                                    "DNSName": $LB_NAME,
+                                    "EvaluateTargetHealth": true
+                                }
+                    		}
+                    	}]
+                    }' > dnsconfig.json 
+                    
+                    
+                    export AWS_RET=$(aws route53  change-resource-record-sets --hosted-zone-id Z10345331WEEH0GJWCNOV --change-batch file://dnsconfig.json)
+                    echo "DNS Result ; ${AWS_RET}"
+                    
+                    export DNS_STATUS=$(echo $AWS_RET | jq -r '.ChangeInfo.Status')
+                    echo "DNS_STATUS = ${DNS_STATUS}"
+                    
+                    export DNS_CHANGE_ID=$(echo $AWS_RET | jq -r '.ChangeInfo.Id')
+                    echo "DNS_CHANGE_ID=${DNS_CHANGE_ID}"
+                    
+                    export DNS_CHANGE_STATUS=$(aws route53 get-change --id $DNS_CHANGE_ID | jq -r '.ChangeInfo.Status')
+                    echo "DNS_CHANGE_STATUS=${DNS_CHANGE_STATUS}"
+                    while [[ "$DNS_CHANGE_STATUS" != "INSYNC" ]]
+                    do
+                        export DNS_CHANGE_STATUS=$(aws route53 get-change --id $DNS_CHANGE_ID | jq -r '.ChangeInfo.Status')
+                        echo "DNS_CHANGE_STATUS=${DNS_CHANGE_STATUS}"
+                        sleep 1
+                    done
+                    
+                    if [[  $DNS_CHANGE_STATUS == "INSYNC" ]]; then
+                        echo "DNS Setup Successful : ${RESOURCERECORDSET}"
+                    else
+                        echo "DNS Setup Failed : ${RESOURCERECORDSET}"
+                        exit -1
+                    fi
+                    
+                   
+                    echo "DNS Setup Completed at: $(date "+%Y.%m.%d-%H.%M.%S")"
+                    
+                          if [[ "${HIGH_AVAILABILITY}" != "false" ]]; then
+                                number=$(kubectl get pods -A -l "pod==hivecms-${HIVE_ORG_ID}-${INSTANCE_ID}" | wc | awk '{print $1}')
+				value=`expr $number - 1`
+				kubectl get pods -A -l "pod==hivecms-${HIVE_ORG_ID}-${INSTANCE_ID}"  | tail -n $value |while read line || [[ -n $line ]];
+				do         
+					POD_STATUS=$(kubectl get pod -A  -l "pod==hivecms-${HIVE_ORG_ID}-${INSTANCE_ID}" | awk '{print $4}' | tail -n 1)
+					echo "POD_STATUS=$POD_STATUS"
+					while [[ "$POD_STATUS" != "Running" && "$POD_STATUS" != "Terminating" ]]
+					do
+						POD_STATUS=$(kubectl get pod -A -l "pod==hivecms-${HIVE_ORG_ID}-${INSTANCE_ID}" | awk '{print $4}' | tail -n 1)
+						echo "POD_STATUS=$POD_STATUS"
+					done  
+				done 
+                          else
+                                    POD_STATUS=$(kubectl get pods -A -l "pod==hivecms-${HIVE_ORG_ID}-${INSTANCE_ID}" | awk '{print $4}' | tail -n 1)    
+                                    while [[ "$POD_STATUS" != "Running" ]]
+                                    do
+                                        POD_STATUS=$(kubectl get pods -A -l "pod==hivecms-${HIVE_ORG_ID}-${INSTANCE_ID}" | awk '{print $4}' | tail -n 1)
+                                        echo "POD_STATUS = ${POD_STATUS}" 
+                                    done    
+                            
+                          fi     
+                           
+ 			number=$(kubectl get pods -A -l "pod==hivecms-${HIVE_ORG_ID}-${INSTANCE_ID}" | wc | awk '{print $1}')
+                        values=`expr $number - 1`
+                        echo $values
+                
+                
+                
+                
+                
+
+                         kubectl get pods -A -l "pod==hivecms-${HIVE_ORG_ID}-${INSTANCE_ID}"  | tail -n $values |while read line || [[ -n $line ]];
+                         do
+                             POD_NAME=$(echo $line | awk '{print $2}')
+                             echo "POD_NAME = ${POD_NAME}"
+                             export POD_SH_RESULT=`kubectl exec $POD_NAME -n ${HIVE_ORG_ID} -- /bin/bash /var/www/html/seed.sh`
+			    // export MQTT_SH_RESULT=`kubectl exec $POD_NAME --container hivecms-mosquitto-container -n ${HIVE_ORG_ID} -- /bin/sh /mqtt.sh`
+
+                             echo "POD_SH_RESULT = $POD_SH_RESULT"
+                         done     
+
+
+                
+                    
+                       
+                    '''
+                } 
+            }
+        }
+    }
+        
+        
+}//Stages Closing
+
+post{
+
+ success{
+     emailext to: 'muddireddyv@embedtechsolutions.com',
+          subject: "App Launched Succesfully",
+          body: "Congrats your app has been Launched Succesfully",
+          replyTo: 'info@embedtechsolutions.com'
+ }
+ 
+ failure{
+ emailext to: 'muddireddyv@embedtechsolutions.com',
+          subject: "App Launch Failed",
+          body: "Pipeline Build is over .. Build # is ..${env.BUILD_NUMBER} and Build status is.. ${currentBuild.result}.",
+          replyTo: 'muddireddyv@embedtechsolutions.com'
+ }
+ aborted{
+ emailext to: 'muddireddyv@embedtechsolutions.com',
+          subject: "App aborted",
+          body: "Pipeline Build is over .. Build # is ..${env.BUILD_NUMBER} and Build status is.. ${currentBuild.result}.",
+          replyTo: 'muddireddyv@embedtechsolutions.com'
+ }   
+  
+	
+}
+
+
+}
