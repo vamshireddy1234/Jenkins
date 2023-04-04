@@ -3,7 +3,7 @@ pipeline{
     agent any
 
     environment {
-        AWS_ACCOUNT_ID="626690110339"
+        AWS_ACCOUNT_ID=""
         AWS_DEFAULT_REGION="us-east-1" 
         IMAGE_REPO_NAME="mqtt"
         IMAGE_TAG="latest"
